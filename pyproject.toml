@@ -1,5 +1,5 @@
 [project]
-name = "windowsserviceeditcommandline"
+name = "windows-service-editor"
 version = "0.4.0"
 description = "Windows 服务管理器 — pywebview + 现代 Web UI"
 authors = [
@@ -13,7 +13,6 @@ dependencies = [
 ]
 
 [project.scripts]
-windowsserviceeditcommandline = "svc_edit.app:main"
 svc-edit = "svc_edit.app:main"
 
 [build-system]

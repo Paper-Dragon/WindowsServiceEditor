@@ -5,9 +5,9 @@ description = "Windows 服务管理器 — pywebview + 现代 Web UI"
 authors = [
     { name = "Paper-Dragon", email = "2678885646@qq.com" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
-    "pyinstaller==6.11.0",
+    "pyinstaller>=6.11.0",
     "pywebview>=6.2.1",
     "pywin32>=312",
 ]

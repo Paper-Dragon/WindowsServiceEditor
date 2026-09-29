@@ -25,7 +25,12 @@
 
 ## 下载
 
-前往 [Releases](https://github.com/Paper-Dragon/WindowsServiceEditor/releases) 下载最新版 `svc-edit.exe`，双击运行即可。
+前往 [Releases](https://github.com/Paper-Dragon/WindowsServiceEditor/releases) 下载最新版：
+
+| 文件 | 说明 |
+|------|------|
+| `svc-edit.exe` | 绿色免安装版，双击即用 |
+| `svc-edit-setup.exe` | 引导式安装程序，含开始菜单 / 桌面快捷方式、卸载支持 |
 
 无需安装 Python，无需安装任何依赖。
 
@@ -44,10 +49,14 @@ python main.py
 ## 打包
 
 ```bash
+# 打包绿色版 exe
 pyinstaller app.spec
+
+# 打包安装程序（需要 Inno Setup 6）
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 ```
 
-产物位于 `dist/svc-edit.exe`。
+绿色版产物位于 `dist/svc-edit.exe`，安装程序产物位于 `dist/svc-edit-setup.exe`。
 
 ## 快捷键
 
@@ -62,6 +71,8 @@ pyinstaller app.spec
 
 ```
 main.py                 # 入口
+installer.iss           # Inno Setup 安装程序脚本
+app.spec                # PyInstaller 打包配置
 svc_edit/
   app.py                # pywebview 窗口启动
   api.py                # JS API 桥接层
@@ -80,6 +91,7 @@ web/
 - **pywebview** — 轻量级跨平台 WebView 容器
 - **HTML / CSS / JS** — 现代化前端界面（无框架依赖）
 - **PyInstaller** — 打包为单文件 exe
+- **Inno Setup** — 生成引导式安装程序
 
 ## License
 

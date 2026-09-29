@@ -1,0 +1,25 @@
+[project]
+name = "windowsserviceeditcommandline"
+version = "0.4.0"
+description = "Windows 服务管理器 — pywebview + 现代 Web UI"
+authors = [
+    { name = "Paper-Dragon", email = "2678885646@qq.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "pyinstaller==6.11.0",
+    "pywebview>=6.2.1",
+    "pywin32>=312",
+]
+
+[project.scripts]
+windowsserviceeditcommandline = "svc_edit.app:main"
+svc-edit = "svc_edit.app:main"
+
+[build-system]
+requires = ["uv_build>=0.12.20,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "svc_edit"
+module-root = ""

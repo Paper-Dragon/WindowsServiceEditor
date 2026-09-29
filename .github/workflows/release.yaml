@@ -5,7 +5,7 @@ on:
     branches:
       - main
     tags:
-      - "v*.*.*.*"
+      - "v*"
   pull_request:
     branches:
       - main
@@ -19,44 +19,65 @@ jobs:
 
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: "3.14"
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: pip-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Set version and build
+      - name: Patch version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          # 从tag中提取版本号
-          if ($env:GITHUB_REF -like "refs/tags/v*") {
-            $version = $env:GITHUB_REF -replace "refs/tags/v", ""
-            $versionArray = $version -split "\."
-            
-            # 更新file_version_info.txt中的版本号
-            (Get-Content file_version_info.txt) -replace "filevers=\(0, 0, 0, 2\)", "filevers=($($versionArray[0]), $($versionArray[1]), $($versionArray[2]), $($versionArray[3]))" | Set-Content file_version_info.txt
-            (Get-Content file_version_info.txt) -replace "prodvers=\(0, 0, 0, 2\)", "prodvers=($($versionArray[0]), $($versionArray[1]), $($versionArray[2]), $($versionArray[3]))" | Set-Content file_version_info.txt
-            (Get-Content file_version_info.txt) -replace "FileVersion', u'0, 0, 0, 2'", "FileVersion', u'$($versionArray[0]), $($versionArray[1]), $($versionArray[2]), $($versionArray[3])'" | Set-Content file_version_info.txt
-            (Get-Content file_version_info.txt) -replace "ProductVersion', u'0.0.0.2'", "ProductVersion', u'$version'" | Set-Content file_version_info.txt
-          }
-          
-          # 构建可执行文件
-          pyinstaller app.spec
+          $tag = $env:GITHUB_REF -replace "^refs/tags/v", ""
+
+          # 统一为 4 段版本号（v1.2.3 → 1.2.3.0，v0.0.0.2 → 0.0.0.2）
+          $parts = $tag -split "\."
+          while ($parts.Count -lt 4) { $parts += "0" }
+          $v4 = $parts[0..3]
+          $dotted  = $v4 -join "."
+          $comma   = $v4 -join ", "
+          $tupled  = "($comma)"
+
+          Write-Host "Version: $dotted  Tuple: $tupled"
+
+          # --- file_version_info.txt ---
+          $fi = Get-Content file_version_info.txt -Raw
+          $fi = $fi -replace 'filevers=\([^)]+\)', "filevers=$tupled"
+          $fi = $fi -replace 'prodvers=\([^)]+\)', "prodvers=$tupled"
+          $fi = $fi -replace "FileVersion',\s*u'[^']*'", "FileVersion', u'$comma'"
+          $fi = $fi -replace "ProductVersion',\s*u'[^']*'", "ProductVersion', u'$dotted'"
+          Set-Content file_version_info.txt $fi -NoNewline
+
+          # --- svc_edit/api.py ---
+          $api = Get-Content svc_edit/api.py -Raw
+          $api = $api -replace '"version":\s*"[^"]*"', "`"version`": `"$dotted`""
+          Set-Content svc_edit/api.py $api -NoNewline
+
+      - name: Build with PyInstaller
+        run: pyinstaller app.spec
 
       - name: Upload executable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-svc-edit
+          name: svc-edit
           path: dist/svc-edit.exe
 
   release:
-    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs: build
 
@@ -64,12 +85,12 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: windows-svc-edit
+          name: svc-edit
           path: ./assets
-      
-      - name: Release executable
+
+      - name: Create GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "assets/*.exe"
+          artifacts: "assets/svc-edit.exe"
           generateReleaseNotes: true
           token: ${{ secrets.GITHUB_TOKEN }}

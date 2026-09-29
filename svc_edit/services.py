@@ -60,6 +60,13 @@ def _reg_query(key, name: str, default: Any = "") -> Any:
         return default
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def _expand(value: Any) -> str:
     if not isinstance(value, str):
         return str(value) if value is not None else ""
@@ -307,8 +314,10 @@ def _read_reg_meta(name: str) -> dict[str, Any]:
     description = ""
     image_path = ""
     working_directory = ""
+    delayed_auto = False
     environments: list[dict[str, str]] = []
     account_name = ""
+    dependencies: list[str] = []
     try:
         path = rf"SYSTEM\CurrentControlSet\Services\{name}"
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as key:
@@ -319,13 +328,23 @@ def _read_reg_meta(name: str) -> dict[str, Any]:
             working_directory = str(_reg_query(key, "AppDirectory", "") or "")
             account_name = str(_reg_query(key, "ObjectName", "") or "")
             environments = parse_environment(_reg_query(key, "Environment", []))
+            delayed_auto = bool(_as_int(_reg_query(key, "DelayedAutostart", 0)))
+            raw_deps = _reg_query(key, "DependOnService", [])
+            if isinstance(raw_deps, (list, tuple)):
+                dependencies = [str(d) for d in raw_deps if d]
+            elif isinstance(raw_deps, str) and raw_deps:
+                dependencies = [raw_deps]
     except Exception:
         pass
     executable, arguments = split_image_path(image_path)
     account_type, account_label = classify_account(account_name)
+    start_label = _start_label(start)
+    if start == 2 and delayed_auto:
+        start_label = "自动（延迟）"
     return {
         "start": start,
-        "start_label": _start_label(start),
+        "delayed_auto": delayed_auto,
+        "start_label": start_label,
         "display_name": display_name,
         "description": description,
         "image_path": image_path,
@@ -335,6 +354,7 @@ def _read_reg_meta(name: str) -> dict[str, Any]:
         "account_type": account_type,
         "account_name": account_label if account_type != "custom" else account_name,
         "environments": environments,
+        "dependencies": dependencies,
     }
 
 
@@ -349,12 +369,30 @@ def _query_failure_raw(name: str) -> dict | None:
         return None
 
 
+def _get_pid(name: str) -> int:
+    """Return the PID of a running service, or 0."""
+    try:
+        hscm = win32service.OpenSCManager(None, None, win32service.SC_MANAGER_CONNECT)
+        try:
+            hs = win32service.OpenService(hscm, name, win32service.SERVICE_QUERY_STATUS)
+            try:
+                info = win32service.QueryServiceStatusEx(hs)
+                return info.get("ProcessId", 0) or 0
+            finally:
+                win32service.CloseServiceHandle(hs)
+        finally:
+            win32service.CloseServiceHandle(hscm)
+    except Exception:
+        return 0
+
+
 def get_service_info(name: str) -> dict[str, Any]:
     meta = _read_reg_meta(name)
     failure_raw = _query_failure_raw(name)
     return {
         "name": name,
         "state": get_state(name),
+        "pid": _get_pid(name),
         "kind": _service_kind(name),
         "failure": failure_from_raw(failure_raw),
         **meta,
@@ -671,6 +709,15 @@ def _registry_config(name: str, payload: dict[str, Any], *, require_executable: 
             _write_image_path(key, image_path)
         _write_working_directory(key, working_directory)
         _write_environment(key, environments)
+        if "delayed_auto" in payload:
+            da = 1 if _as_bool(payload["delayed_auto"]) else 0
+            winreg.SetValueEx(key, "DelayedAutostart", 0, winreg.REG_DWORD, da)
+        if "dependencies" in payload:
+            deps = payload["dependencies"]
+            if isinstance(deps, str):
+                deps = [d.strip() for d in deps.split(",") if d.strip()]
+            if isinstance(deps, list):
+                winreg.SetValueEx(key, "DependOnService", 0, winreg.REG_MULTI_SZ, deps)
 
 
 def _apply_scm_options(name: str, payload: dict[str, Any], *, kind: str) -> None:
@@ -787,6 +834,19 @@ def add_service(payload: dict[str, Any]) -> None:
             if handle is not None:
                 win32service.CloseServiceHandle(handle)
             win32service.CloseServiceHandle(hscm)
+
+        delayed_auto = _as_bool(data.get("delayed_auto", False))
+        deps_raw = data.get("dependencies", [])
+        if delayed_auto or deps_raw:
+            reg_path = rf"SYSTEM\CurrentControlSet\Services\{name}"
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0, winreg.KEY_SET_VALUE) as rk:
+                if delayed_auto:
+                    winreg.SetValueEx(rk, "DelayedAutostart", 0, winreg.REG_DWORD, 1)
+                if deps_raw:
+                    if isinstance(deps_raw, str):
+                        deps_raw = [d.strip() for d in deps_raw.split(",") if d.strip()]
+                    if isinstance(deps_raw, list) and deps_raw:
+                        winreg.SetValueEx(rk, "DependOnService", 0, winreg.REG_MULTI_SZ, deps_raw)
 
         data = {**data, "apply_account": False, "apply_failure": True}
         _registry_config(name, data, require_executable=False)

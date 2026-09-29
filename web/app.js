@@ -53,10 +53,14 @@
     infoWorkdir: $("#info-workdir"),
     infoFailure: $("#info-failure"),
     infoEnv: $("#info-env"),
+    infoPid: $("#info-pid"),
+    infoDeps: $("#info-deps"),
     regKeyPath: $("#reg-key-path"),
     editStart: $("#edit-start"),
     editDisplay: $("#edit-display"),
     editDesc: $("#edit-desc"),
+    editDelayedAuto: $("#edit-delayed-auto"),
+    editDeps: $("#edit-deps"),
     addName: $("#add-name"),
     addDisplay: $("#add-display"),
     addDesc: $("#add-desc"),
@@ -437,6 +441,8 @@
     el.addDisplay.value = "";
     el.addDesc.value = "";
     el.addStart.value = "2";
+    $("#add-delayed-auto").checked = false;
+    $("#add-deps").value = "";
     $("#add-exe").value = "";
     $("#add-args").value = "";
     $("#add-workdir").value = "";
@@ -465,8 +471,12 @@
       type: $(`#${prefix}-fail-${index}`).value,
       delay_sec: Number($(`#${prefix}-fail-delay-${index}`).value || 0),
     }));
+    const delayedAutoEl = $(`#${prefix}-delayed-auto`);
+    const depsEl = $(`#${prefix}-deps`);
     const payload = {
       start: Number($(`#${prefix}-start`).value),
+      delayed_auto: delayedAutoEl ? delayedAutoEl.checked : false,
+      dependencies: depsEl ? depsEl.value.split(",").map((s) => s.trim()).filter(Boolean) : [],
       display_name: $(`#${prefix}-display`).value,
       description: $(`#${prefix}-desc`).value,
       executable: $(`#${prefix}-exe`).value,
@@ -536,6 +546,8 @@
     $("#edit-user").value = info.account_type === "custom" ? info.account_name || "" : "";
     $("#edit-password").value = "";
     $("#edit-grant").checked = false;
+    el.editDelayedAuto.checked = !!info.delayed_auto;
+    el.editDeps.value = (info.dependencies || []).join(", ");
     syncAccount("edit");
     fillFailure("edit", info.failure);
     renderEnv("edit", info.environments || []);
@@ -577,6 +589,10 @@
     el.infoFailure.textContent = failureText(info.failure);
     el.infoEnv.textContent = info.environments?.length
       ? info.environments.map((item) => item.name).join(", ")
+      : "—";
+    el.infoPid.textContent = info.pid ? String(info.pid) : "—";
+    el.infoDeps.textContent = info.dependencies?.length
+      ? info.dependencies.join(", ")
       : "—";
 
     if (isBackgroundRefresh && editingNow()) return;

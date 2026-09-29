@@ -218,6 +218,14 @@
                 <div class="spec-value mono path-text" id="info-path">—</div>
               </div>
               <div class="spec-row">
+                <div class="spec-label">进程 PID</div>
+                <div class="spec-value mono" id="info-pid">—</div>
+              </div>
+              <div class="spec-row">
+                <div class="spec-label">服务依赖</div>
+                <div class="spec-value mono" id="info-deps">—</div>
+              </div>
+              <div class="spec-row">
                 <div class="spec-label">登录账户</div>
                 <div class="spec-value" id="info-account">—</div>
               </div>
@@ -262,6 +270,16 @@
                   <label class="form-label" for="edit-display">显示名称 (Display Name)</label>
                   <input id="edit-display" type="text" class="form-input" spellcheck="false" />
                 </div>
+                <div class="form-cell">
+                  <label class="form-label form-label-check">
+                    <input id="edit-delayed-auto" type="checkbox" />
+                    <span>延迟自动启动 (Delayed Auto-Start)</span>
+                  </label>
+                </div>
+                <div class="form-cell cell-full">
+                  <label class="form-label" for="edit-deps">服务依赖 (Dependencies)，用逗号分隔</label>
+                  <input id="edit-deps" type="text" class="form-input mono" placeholder="如 LanmanWorkstation, Netlogon" spellcheck="false" />
+                </div>
                 <div class="form-cell cell-full">
                   <label class="form-label" for="edit-desc">服务功能描述 (Description)</label>
                   <textarea id="edit-desc" rows="2" class="form-input form-textarea" spellcheck="false"></textarea>
@@ -296,6 +314,16 @@
                 <div class="form-cell cell-full">
                   <label class="form-label" for="add-display">显示名称 (Display Name) *</label>
                   <input id="add-display" type="text" class="form-input" placeholder="在服务管理器界面中呈现的名字" spellcheck="false" />
+                </div>
+                <div class="form-cell">
+                  <label class="form-label form-label-check">
+                    <input id="add-delayed-auto" type="checkbox" />
+                    <span>延迟自动启动 (Delayed Auto-Start)</span>
+                  </label>
+                </div>
+                <div class="form-cell cell-full">
+                  <label class="form-label" for="add-deps">服务依赖 (Dependencies)，用逗号分隔</label>
+                  <input id="add-deps" type="text" class="form-input mono" placeholder="如 LanmanWorkstation, Netlogon" spellcheck="false" />
                 </div>
                 <div class="form-cell cell-full">
                   <label class="form-label" for="add-desc">服务功能描述 (Description) *</label>

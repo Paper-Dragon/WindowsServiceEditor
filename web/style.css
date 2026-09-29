@@ -910,6 +910,19 @@ html[data-theme="dark"] .seg-item.active {
   color: var(--text-muted);
 }
 
+.form-label-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding-top: 18px;
+}
+
+.form-label-check input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .form-input {
   height: 30px;
   padding: 0 8px;

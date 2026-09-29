@@ -24,7 +24,7 @@ class Api:
         return _ok(
             {
                 "is_admin": svc.is_admin(),
-                "version": "0.4.0",
+                "version": "0.5.0",
                 "start_options": START_TYPE_OPTIONS,
                 "type_filters": [
                     {"value": k, "label": v} for k, v in TYPE_FILTERS.items()

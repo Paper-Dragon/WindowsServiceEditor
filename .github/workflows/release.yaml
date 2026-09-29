@@ -106,9 +106,37 @@ jobs:
           name: svc-edit-setup
           path: ./assets
 
+      - name: Check out code for changelog
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Generate release body
+        id: changelog
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${TAG}$" | head -n1)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="$TAG"
+          else
+            RANGE="${PREV_TAG}..${TAG}"
+          fi
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "## What's Changed"
+            echo ""
+            git log "$RANGE" --pretty=format:"- %s (%h)" --no-merges
+            echo ""
+            echo ""
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG:-}...${TAG}"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: ncipollo/release-action@v1
         with:
           artifacts: "assets/svc-edit.exe,assets/svc-edit-setup.exe"
-          generateReleaseNotes: true
+          body: ${{ steps.changelog.outputs.body }}
           token: ${{ secrets.GITHUB_TOKEN }}

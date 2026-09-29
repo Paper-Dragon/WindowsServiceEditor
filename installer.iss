@@ -21,8 +21,7 @@ DisableProgramGroupPage=yes
 ; LicenseFile=LICENSE
 OutputDir=dist
 OutputBaseFilename=svc-edit-setup
-; 如果项目根目录有 app.ico，取消下行注释即可设置安装程序图标
-; SetupIconFile=app.ico
+SetupIconFile=app.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

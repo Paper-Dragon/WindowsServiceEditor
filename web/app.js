@@ -23,6 +23,11 @@
     selectRequestId: 0,
     pollRequestId: 0,
     actionInFlight: false,
+
+    // 事件日志
+    logsRequestId: 0,
+    logsData: [],
+    logsLoading: false,
   };
 
   let searchTimer = null;
@@ -54,6 +59,8 @@
     infoFailure: $("#info-failure"),
     infoEnv: $("#info-env"),
     infoPid: $("#info-pid"),
+    infoPriority: $("#info-priority"),
+    infoPrioritySelect: $("#info-priority-select"),
     infoDeps: $("#info-deps"),
     regKeyPath: $("#reg-key-path"),
     editStart: $("#edit-start"),
@@ -62,6 +69,13 @@
     editDelayedAuto: $("#edit-delayed-auto"),
     editDeps: $("#edit-deps"),
     addName: $("#add-name"),
+    logsServiceName: $("#logs-service-name"),
+    logsCount: $("#logs-count"),
+    logsLoading: $("#logs-loading"),
+    logsEmpty: $("#logs-empty"),
+    logsTableWrap: $("#logs-table-wrap"),
+    logsBody: $("#logs-body"),
+    logsLevelFilter: $("#logs-level-filter"),
     addDisplay: $("#add-display"),
     addDesc: $("#add-desc"),
     addStart: $("#add-start"),
@@ -149,6 +163,9 @@
     state.activeTab = name;
     $$(".pill-tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
     $$(".panel").forEach((p) => p.classList.toggle("active", p.id === `panel-${name}`));
+    if (name === "logs" && state.current) {
+      loadEventLogs(state.current);
+    }
   }
 
   function showEmpty(show) {
@@ -591,6 +608,15 @@
       ? info.environments.map((item) => item.name).join(", ")
       : "—";
     el.infoPid.textContent = info.pid ? String(info.pid) : "—";
+    // 进程优先级：运行中时显示下拉选择器，否则显示文本
+    if (info.pid && info.priority) {
+      el.infoPriority.textContent = "";
+      el.infoPrioritySelect.classList.remove("hidden");
+      el.infoPrioritySelect.value = info.priority;
+    } else {
+      el.infoPriority.textContent = info.pid ? (info.priority_label || "—") : "—";
+      el.infoPrioritySelect.classList.add("hidden");
+    }
     el.infoDeps.textContent = info.dependencies?.length
       ? info.dependencies.join(", ")
       : "—";
@@ -853,6 +879,86 @@
     }
   }
 
+  // ---- 事件日志 ----
+
+  async function loadEventLogs(name) {
+    if (!name || state.logsLoading) return;
+    const thisId = ++state.logsRequestId;
+    state.logsLoading = true;
+
+    el.logsServiceName.textContent = name;
+    el.logsLoading.classList.remove("hidden");
+    el.logsEmpty.classList.add("hidden");
+    el.logsTableWrap.classList.add("hidden");
+
+    try {
+      const res = await api("get_event_logs", name, 200);
+      if (thisId !== state.logsRequestId) return;
+      if (!res.ok) throw new Error(res.message);
+      state.logsData = res.data.logs || [];
+      renderLogs();
+    } catch (err) {
+      if (thisId === state.logsRequestId) {
+        toast(err.message || String(err), "error");
+        el.logsEmpty.classList.remove("hidden");
+      }
+    } finally {
+      if (thisId === state.logsRequestId) {
+        state.logsLoading = false;
+        el.logsLoading.classList.add("hidden");
+      }
+    }
+  }
+
+  function renderLogs() {
+    const filter = el.logsLevelFilter.value;
+    let logs = state.logsData;
+    if (filter !== "all") {
+      const filterMap = {
+        error: ["错误", "严重"],
+        warning: ["警告"],
+        info: ["信息", "详细"],
+      };
+      const allowed = filterMap[filter] || [];
+      logs = logs.filter((e) => allowed.includes(e.level));
+    }
+
+    el.logsBody.innerHTML = "";
+    if (!logs.length) {
+      el.logsEmpty.classList.remove("hidden");
+      el.logsTableWrap.classList.add("hidden");
+      el.logsCount.textContent = "0 条记录";
+      return;
+    }
+
+    el.logsEmpty.classList.add("hidden");
+    el.logsTableWrap.classList.remove("hidden");
+    el.logsCount.textContent = `${logs.length} 条记录`;
+
+    const frag = document.createDocumentFragment();
+    const levelClass = {
+      "严重": "log-level-critical",
+      "错误": "log-level-error",
+      "警告": "log-level-warning",
+      "信息": "log-level-info",
+      "详细": "log-level-verbose",
+    };
+
+    for (const entry of logs) {
+      const tr = document.createElement("tr");
+      const cls = levelClass[entry.level] || "log-level-info";
+      tr.innerHTML = `
+        <td class="cell-time">${escapeHtml(entry.time)}</td>
+        <td><span class="log-level ${cls}">${escapeHtml(entry.level)}</span></td>
+        <td class="cell-eid">${entry.event_id}</td>
+        <td class="cell-source" title="${escapeHtml(entry.source)}">${escapeHtml(entry.source)}</td>
+        <td class="cell-msg">${escapeHtml(entry.message)}</td>
+      `;
+      frag.appendChild(tr);
+    }
+    el.logsBody.appendChild(frag);
+  }
+
   async function copyPath() {
     const text = el.infoPath.textContent || "";
     if (!text || text === "—") {
@@ -934,6 +1040,25 @@
     $("#btn-save").addEventListener("click", saveConfig);
     $("#btn-add").addEventListener("click", addService);
     $("#btn-copy-path").addEventListener("click", copyPath);
+    el.infoPrioritySelect.addEventListener("change", async () => {
+      if (!state.current) return;
+      const priority = el.infoPrioritySelect.value;
+      try {
+        const res = await api("set_priority", state.current, priority);
+        if (!res.ok) {
+          toast(res.message, "error");
+          return;
+        }
+        toast(res.message, "success");
+      } catch (err) {
+        toast(err.message || String(err), "error");
+      }
+    });
+
+    $("#btn-logs-refresh").addEventListener("click", () => {
+      if (state.current) loadEventLogs(state.current);
+    });
+    el.logsLevelFilter.addEventListener("change", () => renderLogs());
 
     $$("[data-browse]").forEach((btn) => {
       btn.addEventListener("click", () => browseFor(btn.dataset.browse));

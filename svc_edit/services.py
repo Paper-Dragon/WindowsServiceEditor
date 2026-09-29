@@ -386,13 +386,92 @@ def _get_pid(name: str) -> int:
         return 0
 
 
+# ---------------------------------------------------------------------------
+# 进程优先级
+# ---------------------------------------------------------------------------
+
+import ctypes
+import ctypes.wintypes
+
+_PRIORITY_MAP = {
+    0x00000040: "idle",         # IDLE_PRIORITY_CLASS
+    0x00004000: "below",        # BELOW_NORMAL_PRIORITY_CLASS
+    0x00000020: "normal",       # NORMAL_PRIORITY_CLASS
+    0x00008000: "above",        # ABOVE_NORMAL_PRIORITY_CLASS
+    0x00000080: "high",         # HIGH_PRIORITY_CLASS
+    0x00000100: "realtime",     # REALTIME_PRIORITY_CLASS
+}
+
+_PRIORITY_LABELS = {
+    "idle": "空闲 (Idle)",
+    "below": "低于正常 (Below Normal)",
+    "normal": "正常 (Normal)",
+    "above": "高于正常 (Above Normal)",
+    "high": "高 (High)",
+    "realtime": "实时 (Realtime)",
+}
+
+_PRIORITY_TO_CLASS = {
+    "idle": 0x00000040,
+    "below": 0x00004000,
+    "normal": 0x00000020,
+    "above": 0x00008000,
+    "high": 0x00000080,
+    "realtime": 0x00000100,
+}
+
+PROCESS_QUERY_INFORMATION = 0x0400
+PROCESS_SET_INFORMATION = 0x0200
+
+
+def get_process_priority(pid: int) -> dict[str, Any]:
+    """获取进程优先级。"""
+    if not pid:
+        return {"priority": "", "priority_label": "", "pid": 0}
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
+    if not handle:
+        return {"priority": "", "priority_label": "无法访问进程", "pid": pid}
+    try:
+        cls = kernel32.GetPriorityClass(handle)
+        key = _PRIORITY_MAP.get(cls, "")
+        label = _PRIORITY_LABELS.get(key, f"未知 (0x{cls:X})")
+        return {"priority": key, "priority_label": label, "pid": pid}
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def set_process_priority(pid: int, priority: str) -> dict[str, Any]:
+    """设置进程优先级。"""
+    if not pid:
+        raise ValueError("服务未运行，无法设置进程优先级")
+    cls = _PRIORITY_TO_CLASS.get(priority)
+    if cls is None:
+        raise ValueError(f"无效的优先级: {priority}")
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_INFORMATION, False, pid)
+    if not handle:
+        raise OSError("无法打开进程，可能权限不足")
+    try:
+        ok = kernel32.SetPriorityClass(handle, cls)
+        if not ok:
+            raise OSError("设置进程优先级失败")
+        return get_process_priority(pid)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def get_service_info(name: str) -> dict[str, Any]:
     meta = _read_reg_meta(name)
     failure_raw = _query_failure_raw(name)
+    pid = _get_pid(name)
+    priority_info = get_process_priority(pid)
     return {
         "name": name,
         "state": get_state(name),
-        "pid": _get_pid(name),
+        "pid": pid,
+        "priority": priority_info.get("priority", ""),
+        "priority_label": priority_info.get("priority_label", ""),
         "kind": _service_kind(name),
         "failure": failure_from_raw(failure_raw),
         **meta,
@@ -909,3 +988,154 @@ def map_winerror(exc: BaseException) -> tuple[str, str | None]:
     if isinstance(exc, ValueError):
         return str(exc), None
     return str(exc), None
+
+
+# ---------------------------------------------------------------------------
+# Windows Event Log 查询
+# ---------------------------------------------------------------------------
+
+def query_event_logs(
+    service_name: str,
+    max_records: int = 200,
+) -> list[dict[str, Any]]:
+    """从 System 和 Application 事件日志中读取与指定服务相关的记录。
+
+    策略:
+    1. 查询以服务名为 Provider 的 Application/System 事件 (服务自身写入的日志)
+    2. 查询 SCM (Service Control Manager) 事件，在 Python 层按服务名/显示名过滤
+    """
+    import win32evtlog
+
+    results: list[dict[str, Any]] = []
+    level_map = {1: "严重", 2: "错误", 3: "警告", 4: "信息", 0: "信息", 5: "详细"}
+    seen_ids: set[tuple[str, int, str]] = set()
+
+    # 获取显示名用于匹配 SCM 事件 (SCM 日志中某些字段使用显示名)
+    display_name = ""
+    try:
+        reg_path = rf"SYSTEM\CurrentControlSet\Services\{service_name}"
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path) as key:
+            display_name = str(_reg_query(key, "DisplayName", "") or "")
+    except Exception:
+        pass
+    match_names = {service_name.lower()}
+    if display_name:
+        match_names.add(display_name.lower())
+
+    def _collect(handle: Any, filter_fn: Any = None) -> None:
+        scanned = 0
+        while len(results) < max_records and scanned < 5000:
+            try:
+                events = win32evtlog.EvtNext(handle, 50, -1, 0)
+            except Exception:
+                break
+            if not events:
+                break
+            for event in events:
+                scanned += 1
+                if len(results) >= max_records:
+                    return
+                try:
+                    xml_str = win32evtlog.EvtRender(event, win32evtlog.EvtRenderEventXml)
+                    if filter_fn and not filter_fn(xml_str):
+                        continue
+                    entry = _parse_event_xml(xml_str, level_map)
+                    if entry:
+                        dedup_key = (entry["time"], entry["event_id"], entry["source"])
+                        if dedup_key not in seen_ids:
+                            seen_ids.add(dedup_key)
+                            results.append(entry)
+                except Exception:
+                    continue
+
+    def _scm_filter(xml_str: str) -> bool:
+        """检查 SCM 事件 XML 中是否包含目标服务名或显示名。"""
+        xml_lower = xml_str.lower()
+        return any(name in xml_lower for name in match_names)
+
+    # 1) 以服务名为 Provider 的直接事件
+    for channel in ("Application", "System"):
+        xpath = f"*[System[Provider[@Name='{service_name}']]]"
+        try:
+            handle = win32evtlog.EvtQuery(
+                channel, win32evtlog.EvtQueryReverseDirection, xpath, None
+            )
+            _collect(handle)
+        except Exception:
+            pass
+
+    # 2) SCM 事件，Python 层过滤
+    scm_xpath = "*[System[Provider[@Name='Service Control Manager']]]"
+    try:
+        handle = win32evtlog.EvtQuery(
+            "System", win32evtlog.EvtQueryReverseDirection, scm_xpath, None
+        )
+        _collect(handle, _scm_filter)
+    except Exception:
+        pass
+
+    results.sort(key=lambda e: e.get("time", ""), reverse=True)
+    return results[:max_records]
+
+
+def _parse_event_xml(xml_str: str, level_map: dict[int, str]) -> dict[str, Any] | None:
+    """从事件 XML 中提取关键字段。"""
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(xml_str)
+    except ET.ParseError:
+        return None
+
+    ns = {"e": "http://schemas.microsoft.com/win/2004/08/events/event"}
+    system = root.find("e:System", ns)
+    if system is None:
+        return None
+
+    provider_el = system.find("e:Provider", ns)
+    source = provider_el.get("Name", "") if provider_el is not None else ""
+
+    time_el = system.find("e:TimeCreated", ns)
+    time_str = time_el.get("SystemTime", "") if time_el is not None else ""
+    # 格式化时间: 2026-09-29T14:55:00.1234567Z -> 2026-09-29 22:55:00
+    display_time = time_str
+    if "T" in time_str:
+        try:
+            from datetime import datetime, timezone, timedelta
+            dt = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+            local_dt = dt.astimezone()
+            display_time = local_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            display_time = time_str[:19].replace("T", " ")
+
+    event_id_el = system.find("e:EventID", ns)
+    event_id = int(event_id_el.text or "0") if event_id_el is not None and event_id_el.text else 0
+
+    level_el = system.find("e:Level", ns)
+    level_num = int(level_el.text or "4") if level_el is not None and level_el.text else 4
+    level = level_map.get(level_num, "信息")
+
+    # 提取消息内容: EventData 中的所有 Data 元素
+    messages: list[str] = []
+    event_data = root.find("e:EventData", ns)
+    if event_data is not None:
+        for data_el in event_data.findall("e:Data", ns):
+            text = (data_el.text or "").strip()
+            if text:
+                messages.append(text)
+
+    # 如果没有 EventData，尝试 RenderingInfo
+    if not messages:
+        rendering = root.find("e:RenderingInfo", ns)
+        if rendering is not None:
+            msg_el = rendering.find("e:Message", ns)
+            if msg_el is not None and msg_el.text:
+                messages.append(msg_el.text.strip())
+
+    return {
+        "time": display_time,
+        "source": source,
+        "event_id": event_id,
+        "level": level,
+        "message": " | ".join(messages) if messages else f"Event ID {event_id}",
+    }

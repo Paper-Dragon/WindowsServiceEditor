@@ -2,13 +2,8 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
@@ -70,6 +65,18 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller app.spec
 
+      - name: Ensure Inno Setup Chinese Simplified language file
+        shell: pwsh
+        run: |
+          $langDir = "C:\Program Files (x86)\Inno Setup 6\Languages"
+          if (-not (Test-Path "$langDir\ChineseSimplified.isl")) {
+            $url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl"
+            Write-Host "Downloading ChineseSimplified.isl ..."
+            Invoke-WebRequest -Uri $url -OutFile "$langDir\ChineseSimplified.isl" -UseBasicParsing
+          } else {
+            Write-Host "ChineseSimplified.isl already exists."
+          }
+
       - name: Build installer with Inno Setup
         shell: pwsh
         run: |
@@ -98,45 +105,23 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: svc-edit
-          path: ./assets
+          path: assets
 
       - name: Download installer artifact
         uses: actions/download-artifact@v8
         with:
           name: svc-edit-setup
-          path: ./assets
+          path: assets
 
-      - name: Check out code for changelog
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Generate release body
-        id: changelog
-        shell: bash
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${TAG}$" | head -n1)
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          if [ -z "$PREV_TAG" ]; then
-            RANGE="$TAG"
-          else
-            RANGE="${PREV_TAG}..${TAG}"
-          fi
-          {
-            echo "body<<CHANGELOG_EOF"
-            echo "## What's Changed"
-            echo ""
-            git log "$RANGE" --pretty=format:"- %s (%h)" --no-merges
-            echo ""
-            echo ""
-            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG:-}...${TAG}"
-            echo "CHANGELOG_EOF"
-          } >> "$GITHUB_OUTPUT"
+      - name: List assets
+        run: ls -lR assets/
 
       - name: Create GitHub Release
-        uses: ncipollo/release-action@v1
+        uses: softprops/action-gh-release@v2
         with:
-          artifacts: "assets/svc-edit.exe,assets/svc-edit-setup.exe"
-          body: ${{ steps.changelog.outputs.body }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            assets/svc-edit.exe
+            assets/svc-edit-setup.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

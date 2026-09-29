@@ -119,6 +119,7 @@
           <nav class="pill-tabs" role="tablist">
             <button class="pill-tab active" data-tab="info" role="tab">概览审查</button>
             <button class="pill-tab" data-tab="edit" role="tab">参数配置</button>
+            <button class="pill-tab" data-tab="logs" role="tab">事件日志</button>
             <button class="pill-tab" data-tab="add" role="tab">注册服务</button>
           </nav>
 
@@ -222,6 +223,20 @@
                 <div class="spec-value mono" id="info-pid">—</div>
               </div>
               <div class="spec-row">
+                <div class="spec-label">进程优先级</div>
+                <div class="spec-value" id="info-priority-wrap">
+                  <span id="info-priority">—</span>
+                  <select id="info-priority-select" class="priority-select hidden">
+                    <option value="idle">空闲 (Idle)</option>
+                    <option value="below">低于正常 (Below Normal)</option>
+                    <option value="normal">正常 (Normal)</option>
+                    <option value="above">高于正常 (Above Normal)</option>
+                    <option value="high">高 (High)</option>
+                    <option value="realtime">实时 (Realtime)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="spec-row">
                 <div class="spec-label">服务依赖</div>
                 <div class="spec-value mono" id="info-deps">—</div>
               </div>
@@ -290,6 +305,48 @@
                 <span class="form-tip">可执行文件与参数写回 ImagePath。工作目录写入 AppDirectory，系统不会因此改变进程当前目录。环境变量、账户和失败恢复在重启服务后生效。驱动服务不能修改账户和失败恢复。</span>
                 <button id="btn-save" class="btn btn-save">保存更改</button>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 事件日志面板 -->
+        <section id="panel-logs" class="panel" role="tabpanel">
+          <div class="panel-inner logs-panel">
+            <div class="logs-toolbar">
+              <div class="logs-toolbar-left">
+                <span id="logs-service-name" class="logs-title">--</span>
+                <span id="logs-count" class="logs-meta">0 条记录</span>
+              </div>
+              <div class="logs-toolbar-right">
+                <select id="logs-level-filter" class="form-input logs-filter-select">
+                  <option value="all">全部级别</option>
+                  <option value="error">错误</option>
+                  <option value="warning">警告</option>
+                  <option value="info">信息</option>
+                </select>
+                <button id="btn-logs-refresh" class="btn btn-browse" title="刷新日志">刷新</button>
+              </div>
+            </div>
+            <div id="logs-loading" class="detail-loading hidden">
+              <div class="list-loading-spinner"></div>
+              <span>正在读取事件日志...</span>
+            </div>
+            <div id="logs-empty" class="logs-empty hidden">
+              <span>未找到与此服务相关的事件日志记录</span>
+            </div>
+            <div id="logs-table-wrap" class="logs-table-wrap hidden">
+              <table class="logs-table">
+                <thead>
+                  <tr>
+                    <th class="col-time">时间</th>
+                    <th class="col-level">级别</th>
+                    <th class="col-eid">事件 ID</th>
+                    <th class="col-source">来源</th>
+                    <th class="col-msg">消息</th>
+                  </tr>
+                </thead>
+                <tbody id="logs-body"></tbody>
+              </table>
             </div>
           </div>
         </section>

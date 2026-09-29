@@ -24,7 +24,7 @@ class Api:
         return _ok(
             {
                 "is_admin": svc.is_admin(),
-                "version": "0.5.0",
+                "version": "0.6.0",
                 "start_options": START_TYPE_OPTIONS,
                 "type_filters": [
                     {"value": k, "label": v} for k, v in TYPE_FILTERS.items()
@@ -98,6 +98,27 @@ class Api:
             if code == "pending_delete":
                 return _ok(None, msg)
             return _err(msg, code)
+        except Exception as exc:
+            msg, code = svc.map_winerror(exc)
+            return _err(msg, code)
+
+    def set_priority(self, name: str, priority: str) -> dict:
+        if not name:
+            return _err("请先选择一个服务")
+        try:
+            pid = svc._get_pid(name)
+            result = svc.set_process_priority(pid, priority)
+            return _ok(result, f"进程优先级已设置为 {result.get('priority_label', priority)}")
+        except Exception as exc:
+            msg, code = svc.map_winerror(exc)
+            return _err(msg, code)
+
+    def get_event_logs(self, name: str, max_records: int = 200) -> dict:
+        if not name:
+            return _err("请先选择一个服务")
+        try:
+            logs = svc.query_event_logs(name, max_records=max_records)
+            return _ok({"logs": logs, "total": len(logs)})
         except Exception as exc:
             msg, code = svc.map_winerror(exc)
             return _err(msg, code)

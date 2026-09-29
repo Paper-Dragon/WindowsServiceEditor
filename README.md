@@ -6,8 +6,7 @@
 
 基于 **pywebview + 现代 Web UI** 的 Windows 服务管理工具。单文件 `svc-edit.exe`，开箱即用，自动请求管理员权限。
 
-<!-- 如有截图，取消注释并替换路径 -->
-<!-- ![screenshot](docs/screenshot.png) -->
+![screenshot](docs/screenshot.png)
 
 ## ✨ 功能亮点
 

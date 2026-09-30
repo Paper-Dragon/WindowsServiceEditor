@@ -18,6 +18,9 @@
 | 服务控制 | 启动、停止、重启、暂停、继续 |
 | 编辑配置 | 启动类型、延迟自动启动、服务依赖、显示名、描述、可执行文件与参数、工作目录、登录账户、失败恢复、环境变量 |
 | 创建服务 | 填写可执行文件后自动填充服务名和工作目录 |
+| 程序变服务 | 将任意 `.exe` 包装为 Windows 服务，支持崩溃自动重启与节流 |
+| 监控告警 | 后台监控指定服务，停止时应用内提醒 + 系统 Toast，可自动拉起 |
+| 托盘常驻 | `--tray` 代理关闭主窗口后仍监控；支持计划任务开机自启（最高权限） |
 | 删除服务 | 二次确认，自动停止运行中的服务后删除 |
 | 主题切换 | 浅色 / 深色 / 跟随系统 |
 
@@ -74,9 +77,15 @@ main.py                 # 入口
 installer.iss           # Inno Setup 安装程序脚本
 app.spec                # PyInstaller 打包配置
 svc_edit/
-  app.py                # pywebview 窗口启动
+  app.py                # pywebview 窗口启动 / --service 宿主分发
   api.py                # JS API 桥接层
   services.py           # Windows SCM / 注册表操作
+  wrapper.py            # 任意程序变服务（宿主 + 注册）
+  monitor.py            # 服务监控告警引擎
+  tray_agent.py         # 托盘常驻监控代理
+  agent_ctl.py          # 托盘启停与开机自启
+  notify.py             # 系统 Toast / UI 推送
+  paths.py              # 本地配置与日志路径
   constants.py          # 常量定义
   elevate.py            # UAC 自动提权
 web/
@@ -84,6 +93,18 @@ web/
   app.js                # 前端逻辑
   style.css             # 样式
 ```
+
+## 托盘监控
+
+```bash
+# 开发态启动托盘代理
+uv run python main.py --tray
+
+# 打包后
+svc-edit.exe --tray
+```
+
+在「监控告警」页可启动/停止托盘常驻，并勾选开机自启（创建登录计划任务 `WindowsServiceEditorMonitor`）。
 
 ## 技术栈
 

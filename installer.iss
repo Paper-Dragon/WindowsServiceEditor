@@ -2,7 +2,7 @@
 ; 需要 Inno Setup 6.x  https://jrsoftware.org/isinfo.php
 
 #ifndef AppVersion
-  #define AppVersion "0.4.0"
+  #define AppVersion "0.8.0"
 #endif
 
 [Setup]

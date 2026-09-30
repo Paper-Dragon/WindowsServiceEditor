@@ -28,6 +28,14 @@
     logsRequestId: 0,
     logsData: [],
     logsLoading: false,
+
+    // 注册方式：native | wrap
+    addMode: "native",
+
+    // 监控
+    monitorConfig: null,
+    monitorEvents: [],
+    trayAgent: null,
   };
 
   let searchTimer = null;
@@ -165,6 +173,9 @@
     $$(".panel").forEach((p) => p.classList.toggle("active", p.id === `panel-${name}`));
     if (name === "logs" && state.current) {
       loadEventLogs(state.current);
+    }
+    if (name === "monitor") {
+      loadMonitorPanel();
     }
   }
 
@@ -601,6 +612,9 @@
     el.infoDisplay.textContent = info.display_name || "—";
     el.infoDesc.textContent = info.description || "— (未提供描述)";
     el.infoPath.textContent = info.image_path || "—";
+    if (info.is_wrapped && info.wrapper?.application) {
+      el.infoPath.textContent = `${info.wrapper.application}${info.wrapper.arguments ? " " + info.wrapper.arguments : ""}`;
+    }
     el.infoAccount.textContent = accountText(info);
     el.infoWorkdir.textContent = info.working_directory || "—";
     el.infoFailure.textContent = failureText(info.failure);
@@ -620,6 +634,17 @@
     el.infoDeps.textContent = info.dependencies?.length
       ? info.dependencies.join(", ")
       : "—";
+
+    const wrapRow = $("#info-wrapper-row");
+    const wrapVal = $("#info-wrapper");
+    if (info.is_wrapped && info.wrapper) {
+      wrapRow?.classList.remove("hidden");
+      const w = info.wrapper;
+      wrapVal.textContent = `${w.application || "—"}${w.arguments ? " " + w.arguments : ""} · 退出后 ${w.on_exit || "restart"}`;
+    } else {
+      wrapRow?.classList.add("hidden");
+      if (wrapVal) wrapVal.textContent = "—";
+    }
 
     if (isBackgroundRefresh && editingNow()) return;
     fillEditForm(info);
@@ -801,6 +826,10 @@
   }
 
   async function addService() {
+    if (state.addMode === "wrap") {
+      await addWrappedService();
+      return;
+    }
     await withBusy("注册新系统服务…", async () => {
       try {
         const created = el.addName.value.trim();
@@ -820,6 +849,90 @@
         toast(err.message || String(err), "error");
       }
     });
+  }
+
+  async function addWrappedService() {
+    await withBusy("将程序注册为 Windows 服务…", async () => {
+      try {
+        const created = $("#wrap-name").value.trim();
+        const payload = {
+          name: created,
+          display_name: $("#wrap-display").value.trim(),
+          description: $("#wrap-desc").value.trim(),
+          start: Number($("#wrap-start").value || 2),
+          delayed_auto: $("#wrap-delayed-auto").checked,
+          application: $("#wrap-exe").value.trim(),
+          arguments: $("#wrap-args").value,
+          working_directory: $("#wrap-workdir").value.trim(),
+          on_exit: $("#wrap-on-exit").value,
+          restart_delay_ms: Number($("#wrap-restart-delay").value || 0),
+          max_restarts: Number($("#wrap-max-restarts").value || 5),
+          throttle_seconds: Number($("#wrap-throttle").value || 60),
+        };
+        const res = await api("add_wrapped_service", payload);
+        if (!res.ok) {
+          toast(res.message, "error");
+          return;
+        }
+        toast(res.message, "success");
+        resetWrapForm();
+        await loadServices(false);
+        if (created) {
+          state.current = created;
+          await selectService(created);
+          switchTab("info");
+        }
+      } catch (err) {
+        toast(err.message || String(err), "error");
+      }
+    });
+  }
+
+  function resetWrapForm() {
+    $("#wrap-name").value = "";
+    $("#wrap-display").value = "";
+    $("#wrap-desc").value = "";
+    $("#wrap-start").value = "2";
+    $("#wrap-exe").value = "";
+    $("#wrap-args").value = "";
+    $("#wrap-workdir").value = "";
+    $("#wrap-on-exit").value = "restart";
+    $("#wrap-restart-delay").value = "3000";
+    $("#wrap-max-restarts").value = "5";
+    $("#wrap-throttle").value = "60";
+    $("#wrap-delayed-auto").checked = false;
+  }
+
+  function setAddMode(mode) {
+    state.addMode = mode === "wrap" ? "wrap" : "native";
+    $$("[data-add-mode]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.addMode === state.addMode);
+    });
+    $("#add-native-block")?.classList.toggle("hidden", state.addMode !== "native");
+    $("#add-wrap-block")?.classList.toggle("hidden", state.addMode !== "wrap");
+    const hint = $("#add-mode-hint");
+    const tip = $("#add-form-tip");
+    const btn = $("#btn-add");
+    if (state.addMode === "wrap") {
+      if (hint) hint.textContent = "把任意程序包装成服务（崩溃可自动重启）";
+      if (tip) tip.textContent = "宿主由本程序提供。目标程序无需本身支持服务协议。日志位于 %ProgramData%\\WindowsServiceEditor\\logs\\。";
+      if (btn) btn.textContent = "创建程序服务";
+    } else {
+      if (hint) hint.textContent = "注册已符合服务规范的可执行文件";
+      if (tip) tip.textContent = "选择可执行文件后，会在服务名和显示名为空时用文件名自动填写。工作目录默认取该文件所在目录，可清空。";
+      if (btn) btn.textContent = "注册服务";
+    }
+  }
+
+  function autofillWrapFromExe(path) {
+    const base = path.split(/[/\\]/).pop() || "";
+    const stem = base.replace(/\.[^.]+$/, "") || base;
+    if (!$("#wrap-name").value.trim()) $("#wrap-name").value = stem;
+    if (!$("#wrap-display").value.trim()) $("#wrap-display").value = stem;
+    if (!$("#wrap-workdir").value.trim()) {
+      const idx = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+      if (idx > 0) $("#wrap-workdir").value = path.slice(0, idx);
+    }
   }
 
   function openDeleteDialog() {
@@ -860,6 +973,7 @@
       if (res.data?.path) {
         $(`#${inputId}`).value = res.data.path;
         if (inputId === "add-exe") autofillFromExe(res.data.path);
+        if (inputId === "wrap-exe") autofillWrapFromExe(res.data.path);
       }
     } catch (err) {
       toast(err.message || String(err), "error");
@@ -1000,6 +1114,228 @@
     });
   }
 
+  // ---- 监控告警 ----
+
+  function readMonitorForm() {
+    const watched = [];
+    $$("#mon-watch-list .mon-watch-item").forEach((row) => {
+      const name = row.dataset.name;
+      if (!name) return;
+      watched.push({
+        name,
+        auto_restart: !!row.querySelector(".mon-auto-restart")?.checked,
+        alert_on_stop: !!row.querySelector(".mon-alert-stop")?.checked,
+        alert_on_start: !!row.querySelector(".mon-alert-start")?.checked,
+      });
+    });
+    return {
+      enabled: $("#mon-enabled").checked,
+      interval_sec: Number($("#mon-interval").value || 5),
+      system_toast: $("#mon-toast").checked,
+      watched,
+    };
+  }
+
+  function fillMonitorForm(config) {
+    state.monitorConfig = config;
+    $("#mon-enabled").checked = !!config.enabled;
+    $("#mon-interval").value = String(config.interval_sec || 5);
+    $("#mon-toast").checked = config.system_toast !== false;
+    renderWatchList(config.watched || []);
+  }
+
+  function renderWatchList(items) {
+    const host = $("#mon-watch-list");
+    const empty = $("#mon-watch-empty");
+    const count = $("#mon-watch-count");
+    host.innerHTML = "";
+    if (!items.length) {
+      host.classList.add("hidden");
+      empty.classList.remove("hidden");
+      count.textContent = "0 项";
+      return;
+    }
+    empty.classList.add("hidden");
+    host.classList.remove("hidden");
+    count.textContent = `${items.length} 项`;
+    const frag = document.createDocumentFragment();
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "mon-watch-item";
+      row.dataset.name = item.name;
+      row.innerHTML = `
+        <div class="mon-watch-main">
+          <span class="mon-watch-name mono">${escapeHtml(item.name)}</span>
+          <button type="button" class="icon-text-btn mon-remove" title="移除">移除</button>
+        </div>
+        <div class="mon-watch-opts">
+          <label class="form-label-check"><input type="checkbox" class="mon-alert-stop" ${item.alert_on_stop !== false ? "checked" : ""}/><span>停止告警</span></label>
+          <label class="form-label-check"><input type="checkbox" class="mon-alert-start" ${item.alert_on_start ? "checked" : ""}/><span>启动告警</span></label>
+          <label class="form-label-check"><input type="checkbox" class="mon-auto-restart" ${item.auto_restart ? "checked" : ""}/><span>自动拉起</span></label>
+        </div>
+      `;
+      row.querySelector(".mon-remove")?.addEventListener("click", () => {
+        const next = readMonitorForm().watched.filter((w) => w.name !== item.name);
+        renderWatchList(next);
+      });
+      frag.appendChild(row);
+    });
+    host.appendChild(frag);
+  }
+
+  function renderMonitorEvents(events) {
+    state.monitorEvents = events || [];
+    const host = $("#mon-events-list");
+    const empty = $("#mon-events-empty");
+    host.innerHTML = "";
+    if (!state.monitorEvents.length) {
+      host.classList.add("hidden");
+      empty.classList.remove("hidden");
+      return;
+    }
+    empty.classList.add("hidden");
+    host.classList.remove("hidden");
+    const frag = document.createDocumentFragment();
+    state.monitorEvents.forEach((ev) => {
+      const row = document.createElement("div");
+      row.className = `mon-event-item level-${ev.level || "info"}`;
+      const ts = ev.ts ? new Date(ev.ts * 1000).toLocaleString() : "";
+      row.innerHTML = `
+        <div class="mon-event-top">
+          <span class="mon-event-title">${escapeHtml(ev.title || ev.name || "告警")}</span>
+          <span class="mon-event-time">${escapeHtml(ts)}</span>
+        </div>
+        <div class="mon-event-msg">${escapeHtml(ev.message || "")}</div>
+      `;
+      frag.appendChild(row);
+    });
+    host.appendChild(frag);
+  }
+
+  function renderTrayAgentStatus(status) {
+    state.trayAgent = status || null;
+    const running = !!status?.running;
+    const dot = $("#mon-agent-dot");
+    const label = $("#mon-agent-label");
+    const btn = $("#btn-mon-tray-toggle");
+    const auto = $("#mon-autostart");
+    if (dot) {
+      dot.className = `status-dot ${running ? "status-running" : "status-stopped"}`;
+    }
+    if (label) {
+      label.textContent = running
+        ? `托盘代理运行中${status.pid ? ` (PID ${status.pid})` : ""}`
+        : "托盘代理：未运行（仅主窗口内监控）";
+    }
+    if (btn) {
+      btn.textContent = running ? "停止托盘常驻" : "启动托盘常驻";
+    }
+    if (auto) {
+      auto.checked = !!status?.autostart;
+    }
+  }
+
+  async function refreshTrayAgentStatus() {
+    try {
+      const res = await api("get_tray_agent_status");
+      if (res.ok) renderTrayAgentStatus(res.data);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  async function toggleTrayAgent() {
+    const running = !!state.trayAgent?.running;
+    try {
+      const res = await api(running ? "stop_tray_agent" : "start_tray_agent");
+      if (!res.ok) {
+        toast(res.message, "error");
+        return;
+      }
+      renderTrayAgentStatus(res.data);
+      toast(res.message || "完成", "success");
+    } catch (err) {
+      toast(err.message || String(err), "error");
+    }
+  }
+
+  async function toggleAutostart() {
+    const enabled = $("#mon-autostart").checked;
+    try {
+      const res = await api("set_monitor_autostart", enabled);
+      if (!res.ok) {
+        toast(res.message, "error");
+        $("#mon-autostart").checked = !enabled;
+        return;
+      }
+      renderTrayAgentStatus(res.data);
+      toast(res.message || "完成", "success");
+    } catch (err) {
+      $("#mon-autostart").checked = !enabled;
+      toast(err.message || String(err), "error");
+    }
+  }
+
+  async function loadMonitorPanel() {
+    try {
+      const [cfgRes, evRes] = await Promise.all([
+        api("get_monitor_config"),
+        api("get_monitor_events", 50),
+        refreshTrayAgentStatus(),
+      ]);
+      if (cfgRes.ok) fillMonitorForm(cfgRes.data);
+      if (evRes.ok) renderMonitorEvents(evRes.data.events || []);
+    } catch (err) {
+      toast(err.message || String(err), "error");
+    }
+  }
+
+  async function saveMonitorConfig() {
+    try {
+      const res = await api("save_monitor_config", readMonitorForm());
+      if (!res.ok) {
+        toast(res.message, "error");
+        return;
+      }
+      fillMonitorForm(res.data);
+      toast(res.message || "已保存", "success");
+    } catch (err) {
+      toast(err.message || String(err), "error");
+    }
+  }
+
+  async function watchCurrentService() {
+    if (!state.current) {
+      toast("请先选定一个服务", "warning");
+      return;
+    }
+    const cfg = readMonitorForm();
+    if (cfg.watched.some((w) => w.name.toLowerCase() === state.current.toLowerCase())) {
+      toast("该服务已在监控列表中", "info");
+      switchTab("monitor");
+      return;
+    }
+    cfg.watched.push({
+      name: state.current,
+      auto_restart: false,
+      alert_on_stop: true,
+      alert_on_start: false,
+    });
+    cfg.enabled = true;
+    try {
+      const res = await api("save_monitor_config", cfg);
+      if (!res.ok) {
+        toast(res.message, "error");
+        return;
+      }
+      fillMonitorForm(res.data);
+      toast(`已监控 ${state.current}`, "success");
+      switchTab("monitor");
+    } catch (err) {
+      toast(err.message || String(err), "error");
+    }
+  }
+
   function bindEvents() {
     $$(".pill-tab").forEach((tab) => {
       tab.addEventListener("click", () => switchTab(tab.dataset.tab));
@@ -1040,6 +1376,35 @@
     $("#btn-save").addEventListener("click", saveConfig);
     $("#btn-add").addEventListener("click", addService);
     $("#btn-copy-path").addEventListener("click", copyPath);
+
+    $$("[data-add-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => setAddMode(btn.dataset.addMode));
+    });
+
+    $("#btn-mon-save")?.addEventListener("click", saveMonitorConfig);
+    $("#btn-mon-watch-current")?.addEventListener("click", watchCurrentService);
+    $("#btn-mon-tray-toggle")?.addEventListener("click", toggleTrayAgent);
+    $("#mon-autostart")?.addEventListener("change", toggleAutostart);
+    $("#btn-mon-events-refresh")?.addEventListener("click", async () => {
+      try {
+        const res = await api("get_monitor_events", 50);
+        if (res.ok) renderMonitorEvents(res.data.events || []);
+      } catch (err) {
+        toast(err.message || String(err), "error");
+      }
+    });
+
+    window.__svcMonitorAlert = (payload) => {
+      const data = typeof payload === "string" ? { message: payload } : payload || {};
+      const level = data.level === "error" ? "error" : data.level === "success" ? "success" : "warning";
+      toast(`${data.title || "服务告警"}：${data.message || ""}`, level);
+      if (state.activeTab === "monitor") {
+        api("get_monitor_events", 50).then((res) => {
+          if (res.ok) renderMonitorEvents(res.data.events || []);
+        }).catch(() => {});
+      }
+    };
+
     el.infoPrioritySelect.addEventListener("change", async () => {
       if (!state.current) return;
       const priority = el.infoPrioritySelect.value;
@@ -1162,6 +1527,8 @@
   async function init() {
     mountRuntime();
     resetAddForm();
+    resetWrapForm();
+    setAddMode("native");
     applyTheme(state.theme);
     syncFilterChips();
     bindEvents();
@@ -1182,6 +1549,12 @@
     }
 
     await loadServices(false);
+    try {
+      const cfg = await api("get_monitor_config");
+      if (cfg.ok) fillMonitorForm(cfg.data);
+    } catch (_) {
+      /* ignore */
+    }
   }
 
   init();

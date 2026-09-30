@@ -466,7 +466,7 @@ def get_service_info(name: str) -> dict[str, Any]:
     failure_raw = _query_failure_raw(name)
     pid = _get_pid(name)
     priority_info = get_process_priority(pid)
-    return {
+    info = {
         "name": name,
         "state": get_state(name),
         "pid": pid,
@@ -476,6 +476,25 @@ def get_service_info(name: str) -> dict[str, Any]:
         "failure": failure_from_raw(failure_raw),
         **meta,
     }
+    try:
+        from .wrapper import read_wrapper_params
+
+        wrapped = read_wrapper_params(name)
+        if wrapped:
+            info["is_wrapped"] = True
+            info["wrapper"] = wrapped
+            # 编辑表单展示目标程序，而不是宿主 ImagePath
+            info["executable"] = wrapped.get("application") or ""
+            info["arguments"] = wrapped.get("arguments") or ""
+            info["working_directory"] = wrapped.get("working_directory") or ""
+            info["host_image_path"] = meta.get("image_path") or ""
+        else:
+            info["is_wrapped"] = False
+            info["wrapper"] = None
+    except Exception:
+        info["is_wrapped"] = False
+        info["wrapper"] = None
+    return info
 
 
 def _enum_scm(service_type: int) -> list[tuple[str, str, int, int]]:
@@ -845,7 +864,41 @@ def save_config(name: str, payload: dict[str, Any]) -> dict[str, Any]:
             check_account=check_scm and _as_bool(data.get("apply_account", True)),
             check_failure=check_scm and _as_bool(data.get("apply_failure", True)),
         )
-        _registry_config(name, data, require_executable=False)
+
+        from .wrapper import is_wrapped_service, write_wrapper_params
+
+        if is_wrapped_service(name):
+            # 保留宿主 ImagePath，只更新目标程序参数与其它服务元数据
+            wrap_payload = {
+                "application": str(data.get("executable") or ""),
+                "arguments": str(data.get("arguments") or ""),
+                "working_directory": str(data.get("working_directory") or ""),
+            }
+            existing = None
+            try:
+                from .wrapper import read_wrapper_params
+
+                existing = read_wrapper_params(name)
+            except Exception:
+                existing = None
+            if existing:
+                wrap_payload.setdefault("restart_delay_ms", existing.get("restart_delay_ms", 3000))
+                wrap_payload.setdefault("throttle_seconds", existing.get("throttle_seconds", 60))
+                wrap_payload.setdefault("max_restarts", existing.get("max_restarts", 5))
+                wrap_payload.setdefault("on_exit", existing.get("on_exit", "restart"))
+            # 暂存可执行字段，避免写坏 ImagePath
+            data_no_image = {
+                **data,
+                "executable": "",
+                "arguments": "",
+                "working_directory": "",
+            }
+            _registry_config(name, data_no_image, require_executable=False)
+            if wrap_payload["application"].strip():
+                write_wrapper_params(name, {**existing, **wrap_payload} if existing else wrap_payload)
+        else:
+            _registry_config(name, data, require_executable=False)
+
         _apply_scm_options(name, data, kind=kind)
         return get_service_info(name)
 
@@ -945,11 +998,19 @@ def delete_service(name: str) -> str:
 
         win32serviceutil.RemoveService(name)
         try:
+            # 包装服务会写入 Parameters 子键，需先删子键再删服务键
+            params = rf"SYSTEM\CurrentControlSet\Services\{name}\Parameters"
+            try:
+                winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, params)
+            except FileNotFoundError:
+                pass
             winreg.DeleteKey(
                 winreg.HKEY_LOCAL_MACHINE,
                 rf"SYSTEM\CurrentControlSet\Services\{name}",
             )
         except FileNotFoundError:
+            pass
+        except OSError:
             pass
         return f"服务 {name} 已删除"
 

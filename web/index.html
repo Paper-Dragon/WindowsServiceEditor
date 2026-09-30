@@ -120,6 +120,7 @@
             <button class="pill-tab active" data-tab="info" role="tab">概览审查</button>
             <button class="pill-tab" data-tab="edit" role="tab">参数配置</button>
             <button class="pill-tab" data-tab="logs" role="tab">事件日志</button>
+            <button class="pill-tab" data-tab="monitor" role="tab">监控告警</button>
             <button class="pill-tab" data-tab="add" role="tab">注册服务</button>
           </nav>
 
@@ -256,6 +257,10 @@
                 <div class="spec-label">环境变量</div>
                 <div class="spec-value mono" id="info-env">—</div>
               </div>
+              <div class="spec-row hidden" id="info-wrapper-row">
+                <div class="spec-label">程序宿主</div>
+                <div class="spec-value" id="info-wrapper">—</div>
+              </div>
             </div>
 
             <!-- 注册表键位速查路径 -->
@@ -351,45 +356,186 @@
           </div>
         </section>
 
+        <!-- 监控告警面板 -->
+        <section id="panel-monitor" class="panel" role="tabpanel">
+          <div class="panel-inner monitor-panel">
+            <div class="monitor-toolbar">
+              <div class="monitor-toolbar-left">
+                <label class="form-label-check monitor-enable">
+                  <input id="mon-enabled" type="checkbox" />
+                  <span>启用后台监控</span>
+                </label>
+                <label class="monitor-inline">
+                  <span>间隔</span>
+                  <input id="mon-interval" type="number" class="form-input mon-interval" min="2" max="300" value="5" />
+                  <span>秒</span>
+                </label>
+                <label class="form-label-check">
+                  <input id="mon-toast" type="checkbox" checked />
+                  <span>系统通知</span>
+                </label>
+              </div>
+              <div class="monitor-toolbar-right">
+                <button id="btn-mon-watch-current" class="btn btn-browse" type="button" title="将当前选中服务加入监控">监控当前</button>
+                <button id="btn-mon-save" class="btn btn-save" type="button">保存配置</button>
+              </div>
+            </div>
+
+            <div class="monitor-agent-bar">
+              <div class="monitor-agent-status">
+                <span class="status-dot" id="mon-agent-dot"></span>
+                <span id="mon-agent-label">托盘代理：未运行</span>
+              </div>
+              <div class="monitor-agent-actions">
+                <button id="btn-mon-tray-toggle" class="btn btn-browse" type="button">启动托盘常驻</button>
+                <label class="form-label-check">
+                  <input id="mon-autostart" type="checkbox" />
+                  <span>开机自启</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="monitor-split">
+              <div class="monitor-watched-card">
+                <div class="monitor-card-head">
+                  <span>监控列表</span>
+                  <span id="mon-watch-count" class="logs-meta">0 项</span>
+                </div>
+                <div id="mon-watch-empty" class="logs-empty">尚未添加监控项。选中服务后点击「监控当前」。</div>
+                <div id="mon-watch-list" class="mon-watch-list hidden"></div>
+              </div>
+              <div class="monitor-events-card">
+                <div class="monitor-card-head">
+                  <span>最近告警</span>
+                  <button id="btn-mon-events-refresh" class="btn btn-browse" type="button">刷新</button>
+                </div>
+                <div id="mon-events-empty" class="logs-empty">暂无告警记录</div>
+                <div id="mon-events-list" class="mon-events-list hidden"></div>
+              </div>
+            </div>
+            <p class="form-tip monitor-tip">可启动「托盘常驻」：关闭主窗口后仍继续监控；勾选开机自启后登录即以计划任务（最高权限）拉起代理。</p>
+          </div>
+        </section>
+
         <!-- 新建服务面板 -->
         <section id="panel-add" class="panel" role="tabpanel">
           <div class="panel-inner">
             <div class="compact-form">
-              <div class="form-grid">
-                <div class="form-cell">
-                  <label class="form-label" for="add-name">内部服务名称 (Service Name) *</label>
-                  <input id="add-name" type="text" class="form-input mono" placeholder="如 MyAgentSvc" spellcheck="false" />
+              <div class="add-mode-strip">
+                <div class="seg-group" role="group" aria-label="注册方式">
+                  <button type="button" class="seg-item active" data-add-mode="native">原生服务</button>
+                  <button type="button" class="seg-item" data-add-mode="wrap">程序变服务</button>
                 </div>
-                <div class="form-cell">
-                  <label class="form-label" for="add-start">默认启动行为 (Start Type)</label>
-                  <select id="add-start" class="form-input">
-                    <option value="2" selected>2 - 自动 (Automatic)</option>
-                    <option value="3">3 - 手动 (Manual)</option>
-                    <option value="4">4 - 禁用 (Disabled)</option>
-                  </select>
+                <span id="add-mode-hint" class="form-tip add-mode-hint">注册已符合服务规范的可执行文件</span>
+              </div>
+
+              <div id="add-native-block">
+                <div class="form-grid">
+                  <div class="form-cell">
+                    <label class="form-label" for="add-name">内部服务名称 (Service Name) *</label>
+                    <input id="add-name" type="text" class="form-input mono" placeholder="如 MyAgentSvc" spellcheck="false" />
+                  </div>
+                  <div class="form-cell">
+                    <label class="form-label" for="add-start">默认启动行为 (Start Type)</label>
+                    <select id="add-start" class="form-input">
+                      <option value="2" selected>2 - 自动 (Automatic)</option>
+                      <option value="3">3 - 手动 (Manual)</option>
+                      <option value="4">4 - 禁用 (Disabled)</option>
+                    </select>
+                  </div>
+                  <div class="form-cell cell-full">
+                    <label class="form-label" for="add-display">显示名称 (Display Name) *</label>
+                    <input id="add-display" type="text" class="form-input" placeholder="在服务管理器界面中呈现的名字" spellcheck="false" />
+                  </div>
+                  <div class="form-cell">
+                    <label class="form-label form-label-check">
+                      <input id="add-delayed-auto" type="checkbox" />
+                      <span>延迟自动启动 (Delayed Auto-Start)</span>
+                    </label>
+                  </div>
+                  <div class="form-cell cell-full">
+                    <label class="form-label" for="add-deps">服务依赖 (Dependencies)，用逗号分隔</label>
+                    <input id="add-deps" type="text" class="form-input mono" placeholder="如 LanmanWorkstation, Netlogon" spellcheck="false" />
+                  </div>
+                  <div class="form-cell cell-full">
+                    <label class="form-label" for="add-desc">服务功能描述 (Description) *</label>
+                    <textarea id="add-desc" rows="2" class="form-input form-textarea" placeholder="描述此服务的职责与归属组件" spellcheck="false"></textarea>
+                  </div>
                 </div>
-                <div class="form-cell cell-full">
-                  <label class="form-label" for="add-display">显示名称 (Display Name) *</label>
-                  <input id="add-display" type="text" class="form-input" placeholder="在服务管理器界面中呈现的名字" spellcheck="false" />
-                </div>
-                <div class="form-cell">
-                  <label class="form-label form-label-check">
-                    <input id="add-delayed-auto" type="checkbox" />
-                    <span>延迟自动启动 (Delayed Auto-Start)</span>
-                  </label>
-                </div>
-                <div class="form-cell cell-full">
-                  <label class="form-label" for="add-deps">服务依赖 (Dependencies)，用逗号分隔</label>
-                  <input id="add-deps" type="text" class="form-input mono" placeholder="如 LanmanWorkstation, Netlogon" spellcheck="false" />
-                </div>
-                <div class="form-cell cell-full">
-                  <label class="form-label" for="add-desc">服务功能描述 (Description) *</label>
-                  <textarea id="add-desc" rows="2" class="form-input form-textarea" placeholder="描述此服务的职责与归属组件" spellcheck="false"></textarea>
+                <div id="add-runtime"></div>
+              </div>
+
+              <div id="add-wrap-block" class="hidden">
+                <div class="form-grid">
+                  <div class="form-cell">
+                    <label class="form-label" for="wrap-name">内部服务名称 *</label>
+                    <input id="wrap-name" type="text" class="form-input mono" placeholder="如 MyAppHost" spellcheck="false" />
+                  </div>
+                  <div class="form-cell">
+                    <label class="form-label" for="wrap-start">启动类型</label>
+                    <select id="wrap-start" class="form-input">
+                      <option value="2" selected>自动</option>
+                      <option value="3">手动</option>
+                      <option value="4">禁用</option>
+                    </select>
+                  </div>
+                  <div class="form-cell cell-full">
+                    <label class="form-label" for="wrap-display">显示名称 *</label>
+                    <input id="wrap-display" type="text" class="form-input" placeholder="服务控制台中的显示名" spellcheck="false" />
+                  </div>
+                  <div class="form-cell cell-full">
+                    <label class="form-label" for="wrap-desc">描述</label>
+                    <textarea id="wrap-desc" rows="2" class="form-input form-textarea" placeholder="可留空，将自动生成" spellcheck="false"></textarea>
+                  </div>
+                  <div class="form-cell cell-full">
+                    <label class="form-label" for="wrap-exe">目标程序 *</label>
+                    <div class="input-with-btn">
+                      <input id="wrap-exe" type="text" class="form-input mono" placeholder="选择任意 .exe（无需本身是服务）" spellcheck="false" />
+                      <button type="button" class="btn btn-browse" data-browse="wrap-exe">浏览</button>
+                    </div>
+                  </div>
+                  <div class="form-cell cell-full">
+                    <label class="form-label" for="wrap-args">启动参数</label>
+                    <input id="wrap-args" type="text" class="form-input mono" placeholder="可选" spellcheck="false" />
+                  </div>
+                  <div class="form-cell cell-full">
+                    <label class="form-label" for="wrap-workdir">工作目录</label>
+                    <div class="input-with-btn">
+                      <input id="wrap-workdir" type="text" class="form-input mono" placeholder="默认取程序所在目录" spellcheck="false" />
+                      <button type="button" class="btn btn-browse" data-browse-dir="wrap-workdir">浏览</button>
+                    </div>
+                  </div>
+                  <div class="form-cell">
+                    <label class="form-label" for="wrap-on-exit">进程退出后</label>
+                    <select id="wrap-on-exit" class="form-input">
+                      <option value="restart" selected>自动重启</option>
+                      <option value="ignore">保持服务运行（不重启）</option>
+                      <option value="exit">停止服务</option>
+                    </select>
+                  </div>
+                  <div class="form-cell">
+                    <label class="form-label" for="wrap-restart-delay">重启延迟 (毫秒)</label>
+                    <input id="wrap-restart-delay" type="number" class="form-input" min="0" step="100" value="3000" />
+                  </div>
+                  <div class="form-cell">
+                    <label class="form-label" for="wrap-max-restarts">节流窗口内最大重启次数</label>
+                    <input id="wrap-max-restarts" type="number" class="form-input" min="0" value="5" />
+                  </div>
+                  <div class="form-cell">
+                    <label class="form-label" for="wrap-throttle">节流窗口 (秒)</label>
+                    <input id="wrap-throttle" type="number" class="form-input" min="5" value="60" />
+                  </div>
+                  <div class="form-cell">
+                    <label class="form-label form-label-check">
+                      <input id="wrap-delayed-auto" type="checkbox" />
+                      <span>延迟自动启动</span>
+                    </label>
+                  </div>
                 </div>
               </div>
-              <div id="add-runtime"></div>
+
               <div class="form-actions">
-                <span class="form-tip">选择可执行文件后，会在服务名和显示名为空时用文件名自动填写。工作目录默认取该文件所在目录，可清空。</span>
+                <span id="add-form-tip" class="form-tip">选择可执行文件后，会在服务名和显示名为空时用文件名自动填写。工作目录默认取该文件所在目录，可清空。</span>
                 <button id="btn-add" class="btn btn-create">注册服务</button>
               </div>
             </div>

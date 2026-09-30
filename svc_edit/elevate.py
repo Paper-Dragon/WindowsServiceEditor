@@ -44,7 +44,10 @@ def elevate_or_exit() -> None:
     若当前非管理员：弹出 UAC，启动提权进程后退出当前进程。
     用户取消 UAC 时提示并退出。
     已是管理员则直接返回。
+    服务宿主模式（--service）不提权，交由 SCM 以 SYSTEM 运行。
     """
+    if len(sys.argv) >= 2 and sys.argv[1] == "--service":
+        return
     if is_admin():
         return
 

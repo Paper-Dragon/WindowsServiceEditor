@@ -5,8 +5,13 @@ from __future__ import annotations
 import webview
 import win32service
 
+from . import agent_ctl
+from . import monitor as mon
 from . import services as svc
+from . import wrapper as wrap
 from .constants import START_TYPE_OPTIONS, TYPE_FILTERS
+
+APP_VERSION = "0.8.0"
 
 
 def _ok(data=None, message: str = "") -> dict:
@@ -20,15 +25,26 @@ def _err(message: str, code: str | None = None) -> dict:
 class Api:
     """前端通过 window.pywebview.api 调用。"""
 
+    def __init__(self) -> None:
+        self._monitor: mon.MonitorEngine | None = None
+
+    def attach_monitor(self, engine: mon.MonitorEngine) -> None:
+        self._monitor = engine
+
     def get_meta(self) -> dict:
         return _ok(
             {
                 "is_admin": svc.is_admin(),
-                "version": "0.6.0",
+                "version": APP_VERSION,
                 "start_options": START_TYPE_OPTIONS,
                 "type_filters": [
                     {"value": k, "label": v} for k, v in TYPE_FILTERS.items()
                 ],
+                "features": {
+                    "monitor": True,
+                    "wrapper": True,
+                    "tray_agent": True,
+                },
             }
         )
 
@@ -87,6 +103,16 @@ class Api:
             msg, code = svc.map_winerror(exc)
             return _err(msg, code)
 
+    def add_wrapped_service(self, payload: dict | None = None) -> dict:
+        if not isinstance(payload, dict):
+            return _err("配置格式无效")
+        try:
+            info = wrap.add_wrapped_service(payload)
+            return _ok(info, f"已将程序注册为服务 {info.get('name')}")
+        except Exception as exc:
+            msg, code = svc.map_winerror(exc)
+            return _err(msg, code)
+
     def delete_service(self, name: str) -> dict:
         if not name:
             return _err("请先选择一个服务")
@@ -122,6 +148,62 @@ class Api:
         except Exception as exc:
             msg, code = svc.map_winerror(exc)
             return _err(msg, code)
+
+    def get_monitor_config(self) -> dict:
+        if self._monitor is None:
+            return _ok(mon.load_config())
+        return _ok(self._monitor.get_config())
+
+    def save_monitor_config(self, payload: dict | None = None) -> dict:
+        if not isinstance(payload, dict):
+            return _err("监控配置格式无效")
+        try:
+            if self._monitor is None:
+                config = mon.save_config(payload)
+            else:
+                config = self._monitor.update_config(payload)
+            return _ok(config, "监控配置已保存")
+        except Exception as exc:
+            return _err(str(exc))
+
+    def get_monitor_events(self, limit: int = 50) -> dict:
+        if self._monitor is None:
+            return _ok({"events": mon.load_events(limit)})
+        return _ok({"events": self._monitor.get_events(limit)})
+
+    def get_tray_agent_status(self) -> dict:
+        try:
+            return _ok(agent_ctl.agent_status())
+        except Exception as exc:
+            return _err(str(exc))
+
+    def start_tray_agent(self) -> dict:
+        try:
+            if self._monitor is not None:
+                self._monitor.stop()
+            status = agent_ctl.start_tray_agent()
+            if not status.get("running"):
+                return _err("托盘监控代理启动失败")
+            return _ok(status, "托盘监控代理已启动（关闭主窗口后仍继续监控）")
+        except Exception as exc:
+            return _err(str(exc))
+
+    def stop_tray_agent(self) -> dict:
+        try:
+            status = agent_ctl.stop_tray_agent()
+            if self._monitor is not None:
+                self._monitor.start()
+            return _ok(status, "托盘监控代理已停止，改由主窗口内监控")
+        except Exception as exc:
+            return _err(str(exc))
+
+    def set_monitor_autostart(self, enabled: bool = False) -> dict:
+        try:
+            status = agent_ctl.set_autostart(bool(enabled))
+            msg = "已设置开机启动监控代理" if enabled else "已取消开机启动"
+            return _ok(status, msg)
+        except Exception as exc:
+            return _err(str(exc))
 
     def pick_file(self) -> dict:
         window = webview.windows[0] if webview.windows else None

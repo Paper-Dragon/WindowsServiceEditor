@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import os
+import threading
+import time
+import urllib.error
+import webbrowser
+
 import webview
 import win32service
 
 from . import agent_ctl
 from . import monitor as mon
 from . import services as svc
+from . import updater
 from . import wrapper as wrap
 from .constants import START_TYPE_OPTIONS, TYPE_FILTERS
 
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.9.0"
 
 
 def _ok(data=None, message: str = "") -> dict:
@@ -27,6 +34,7 @@ class Api:
 
     def __init__(self) -> None:
         self._monitor: mon.MonitorEngine | None = None
+        self._update_info: dict | None = None
 
     def attach_monitor(self, engine: mon.MonitorEngine) -> None:
         self._monitor = engine
@@ -44,7 +52,10 @@ class Api:
                     "monitor": True,
                     "wrapper": True,
                     "tray_agent": True,
+                    "auto_update": True,
                 },
+                "releases_url": updater.RELEASES_URL,
+                "frozen": updater.is_frozen_build(),
             }
         )
 
@@ -202,6 +213,54 @@ class Api:
             status = agent_ctl.set_autostart(bool(enabled))
             msg = "已设置开机启动监控代理" if enabled else "已取消开机启动"
             return _ok(status, msg)
+        except Exception as exc:
+            return _err(str(exc))
+
+    def check_update(self) -> dict:
+        try:
+            info = updater.check_for_update(APP_VERSION)
+            self._update_info = info
+            return _ok(info, str(info.get("message") or "检查完成"))
+        except urllib.error.HTTPError as exc:
+            return _err(f"检查更新失败: GitHub 返回 HTTP {exc.code}")
+        except urllib.error.URLError as exc:
+            return _err(f"检查更新失败: 无法连接 GitHub（{exc.reason}）")
+        except Exception as exc:
+            return _err(f"检查更新失败: {exc}")
+
+    def apply_update(self) -> dict:
+        try:
+            info = self._update_info
+            if not info or not info.get("update_available"):
+                info = updater.check_for_update(APP_VERSION)
+                self._update_info = info
+            if not info.get("update_available"):
+                return _err("当前没有可用更新")
+            session = updater.get_session()
+            session.start_apply(info, restart=True)
+
+            def _watch_exit() -> None:
+                for _ in range(600):
+                    snap = session.snapshot()
+                    if snap["state"] == "restarting":
+                        time.sleep(0.6)
+                        os._exit(0)
+                    if snap["state"] in ("error", "done"):
+                        return
+                    time.sleep(0.2)
+
+            threading.Thread(target=_watch_exit, name="svc-update-exit", daemon=True).start()
+            return _ok(session.snapshot(), "已开始下载更新")
+        except Exception as exc:
+            return _err(str(exc))
+
+    def get_update_progress(self) -> dict:
+        return _ok(updater.get_session().snapshot())
+
+    def open_releases(self) -> dict:
+        try:
+            webbrowser.open(updater.RELEASES_URL)
+            return _ok(None, "已打开发布页面")
         except Exception as exc:
             return _err(str(exc))
 

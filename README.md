@@ -21,8 +21,9 @@
 | 程序变服务 | 将任意 `.exe` 包装为 Windows 服务，支持崩溃自动重启与节流 |
 | 监控告警 | 后台监控指定服务，停止时应用内提醒 + 系统 Toast，可自动拉起 |
 | 托盘常驻 | `--tray` 代理关闭主窗口后仍监控；支持计划任务开机自启（最高权限） |
+| 自动升级 | 从 GitHub Releases 检查新版本，打包版可一键下载替换并重启 |
 | 删除服务 | 二次确认，自动停止运行中的服务后删除 |
-| 主题切换 | 浅色 / 深色 / 跟随系统 |
+| 主题切换 | 浅色 / 深色 / 跟随系统（默认跟随系统，浅色为白底） |
 
 > 启动时自动请求 **管理员权限**（UAC）。打包版 exe 已嵌入 `requireAdministrator` 清单。
 
@@ -84,6 +85,7 @@ svc_edit/
   monitor.py            # 服务监控告警引擎
   tray_agent.py         # 托盘常驻监控代理
   agent_ctl.py          # 托盘启停与开机自启
+  updater.py            # GitHub Releases 自动升级
   notify.py             # 系统 Toast / UI 推送
   paths.py              # 本地配置与日志路径
   constants.py          # 常量定义
@@ -92,6 +94,8 @@ web/
   index.html            # 前端页面
   app.js                # 前端逻辑
   style.css             # 样式
+  logo.png              # 应用标志
+app.ico                 # Windows 图标
 ```
 
 ## 托盘监控
@@ -105,6 +109,10 @@ svc-edit.exe --tray
 ```
 
 在「监控告警」页可启动/停止托盘常驻，并勾选开机自启（创建登录计划任务 `WindowsServiceEditorMonitor`）。
+
+## 自动升级
+
+打包版（`svc-edit.exe`）启动后会静默查询 [GitHub Releases](https://github.com/Paper-Dragon/WindowsServiceEditor/releases)。顶栏「更新」可手动检查；若有新版本且资源名为 `svc-edit.exe`，可一键下载替换并重启。开发态（`python main.py`）仅支持打开 Releases 页面。
 
 ## 技术栈
 

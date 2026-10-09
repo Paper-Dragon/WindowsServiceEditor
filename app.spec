@@ -18,6 +18,7 @@ a = Analysis(
         'svc_edit.paths',
         'svc_edit.agent_ctl',
         'svc_edit.tray_agent',
+        'svc_edit.updater',
         'servicemanager',
         'win32timezone',
     ],

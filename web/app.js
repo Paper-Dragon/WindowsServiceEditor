@@ -11,7 +11,7 @@
     current: null,
     loading: false,
     busy: false,
-    theme: localStorage.getItem("svc-theme") || "dark",
+    theme: localStorage.getItem("svc-theme") || "system",
     stateFilter: "all",
     typeFilter: "win32",
     focusIndex: -1,
@@ -36,6 +36,12 @@
     monitorConfig: null,
     monitorEvents: [],
     trayAgent: null,
+
+    // 更新
+    updateInfo: null,
+    updatePolling: false,
+    appVersion: "0.9.0",
+    frozen: false,
   };
 
   let searchTimer = null;
@@ -1336,6 +1342,158 @@
     }
   }
 
+  // ---- 自动更新 ----
+
+  function showUpdateDialog() {
+    const dlg = $("#update-dialog");
+    if (dlg && !dlg.open) dlg.showModal();
+  }
+
+  function closeUpdateDialog() {
+    const dlg = $("#update-dialog");
+    if (dlg?.open) dlg.close();
+  }
+
+  function fillUpdateDialog(info, message) {
+    state.updateInfo = info || null;
+    const available = !!info?.update_available;
+    const status = info?.status || (available ? "update_available" : "up_to_date");
+    const titles = {
+      update_available: `发现新版本 ${info?.latest_version || ""}`.trim(),
+      ahead: "当前已领先发布版",
+      up_to_date: "已是最新版本",
+      unknown: "检查更新",
+    };
+    $("#update-dialog-title").textContent = titles[status] || "检查更新";
+
+    let summary = message || info?.message || "";
+    if (!summary) {
+      if (available) {
+        summary = `当前 ${info.current_version} → 最新 ${info.latest_version}`;
+      } else if (status === "ahead") {
+        summary = `本地 ${info.current_version}，GitHub 已发布 ${info.latest_version}`;
+      } else {
+        summary = `当前版本 ${info?.current_version || state.appVersion}`;
+      }
+    }
+    $("#update-dialog-summary").textContent = summary;
+
+    const notes = $("#update-dialog-notes");
+    if (available && info?.body) {
+      notes.textContent = info.body;
+      notes.classList.remove("hidden");
+    } else {
+      notes.textContent = "";
+      notes.classList.add("hidden");
+    }
+    const applyBtn = $("#btn-update-apply");
+    if (available) {
+      applyBtn.classList.remove("hidden");
+      applyBtn.disabled = false;
+      applyBtn.textContent = info.can_apply ? "立即更新" : "前往下载";
+    } else {
+      applyBtn.classList.add("hidden");
+    }
+    $("#update-dot")?.classList.toggle("hidden", !available);
+  }
+
+  async function checkForUpdate({ silent = false } = {}) {
+    if (!silent) {
+      showUpdateDialog();
+      $("#update-dialog-title").textContent = "检查更新";
+      $("#update-dialog-summary").textContent = "正在查询 GitHub Releases…";
+      $("#update-dialog-notes").classList.add("hidden");
+      $("#btn-update-apply").classList.add("hidden");
+      $("#update-progress-wrap").classList.add("hidden");
+    }
+    try {
+      const res = await api("check_update");
+      if (!res.ok) {
+        if (!silent) {
+          $("#update-dialog-summary").textContent = res.message || "检查失败";
+          toast(res.message, "error");
+        }
+        return;
+      }
+      fillUpdateDialog(res.data, res.message);
+      if (!silent) showUpdateDialog();
+      else if (res.data?.update_available) {
+        $("#update-dot")?.classList.remove("hidden");
+        setStatus(`发现新版本 ${res.data.latest_version}`);
+      }
+    } catch (err) {
+      if (!silent) {
+        $("#update-dialog-summary").textContent = err.message || String(err);
+        toast(err.message || String(err), "error");
+      }
+    }
+  }
+
+  async function pollUpdateProgress() {
+    if (state.updatePolling) return;
+    state.updatePolling = true;
+    const wrap = $("#update-progress-wrap");
+    const fill = $("#update-progress-fill");
+    const text = $("#update-progress-text");
+    wrap.classList.remove("hidden");
+    try {
+      while (state.updatePolling) {
+        const res = await api("get_update_progress");
+        if (!res.ok) break;
+        const p = res.data || {};
+        fill.style.width = `${p.percent || 0}%`;
+        text.textContent = p.total
+          ? `${p.percent || 0}%`
+          : p.state === "downloading"
+            ? "下载中…"
+            : `${p.percent || 0}%`;
+        $("#update-dialog-summary").textContent = p.message || p.state || "";
+        if (p.state === "error") {
+          toast(p.error || "升级失败", "error");
+          $("#btn-update-apply").disabled = false;
+          break;
+        }
+        if (p.state === "restarting") {
+          $("#update-dialog-summary").textContent = "即将退出并完成更新…";
+          break;
+        }
+        if (p.state === "done") {
+          toast(p.message || "请按安装向导完成升级", "success");
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    } finally {
+      state.updatePolling = false;
+    }
+  }
+
+  async function applyUpdate() {
+    const info = state.updateInfo;
+    if (!info?.update_available) return;
+    if (!info.can_apply) {
+      try {
+        await api("open_releases");
+      } catch (_) {
+        /* ignore */
+      }
+      return;
+    }
+    $("#btn-update-apply").disabled = true;
+    try {
+      const res = await api("apply_update");
+      if (!res.ok) {
+        toast(res.message, "error");
+        $("#btn-update-apply").disabled = false;
+        return;
+      }
+      pollUpdateProgress();
+    } catch (err) {
+      toast(err.message || String(err), "error");
+      $("#btn-update-apply").disabled = false;
+    }
+  }
+
   function bindEvents() {
     $$(".pill-tab").forEach((tab) => {
       tab.addEventListener("click", () => switchTab(tab.dataset.tab));
@@ -1385,6 +1543,16 @@
     $("#btn-mon-watch-current")?.addEventListener("click", watchCurrentService);
     $("#btn-mon-tray-toggle")?.addEventListener("click", toggleTrayAgent);
     $("#mon-autostart")?.addEventListener("change", toggleAutostart);
+    $("#btn-check-update")?.addEventListener("click", () => checkForUpdate({ silent: false }));
+    $("#btn-update-close")?.addEventListener("click", closeUpdateDialog);
+    $("#btn-update-apply")?.addEventListener("click", applyUpdate);
+    $("#btn-update-releases")?.addEventListener("click", async () => {
+      try {
+        await api("open_releases");
+      } catch (err) {
+        toast(err.message || String(err), "error");
+      }
+    });
     $("#btn-mon-events-refresh")?.addEventListener("click", async () => {
       try {
         const res = await api("get_monitor_events", 50);
@@ -1541,8 +1709,12 @@
 
     try {
       const meta = await api("get_meta");
-      if (meta.ok && !meta.data.is_admin) {
-        el.adminBadge.classList.remove("hidden");
+      if (meta.ok) {
+        if (!meta.data.is_admin) el.adminBadge.classList.remove("hidden");
+        state.appVersion = meta.data.version || state.appVersion;
+        state.frozen = !!meta.data.frozen;
+        const verEl = $("#app-version");
+        if (verEl) verEl.textContent = `v${state.appVersion}`;
       }
     } catch (_) {
       /* ignore */
@@ -1555,6 +1727,9 @@
     } catch (_) {
       /* ignore */
     }
+
+    // 启动后静默检查更新（失败忽略）
+    setTimeout(() => checkForUpdate({ silent: true }), 2500);
   }
 
   init();

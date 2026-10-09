@@ -1,6 +1,6 @@
 [project]
 name = "windows-service-editor"
-version = "0.8.0"
+version = "0.9.0"
 description = "Windows 服务管理器 — pywebview + 现代 Web UI"
 authors = [
     { name = "Paper-Dragon", email = "2678885646@qq.com" }
